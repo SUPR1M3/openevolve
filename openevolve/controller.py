@@ -28,6 +28,11 @@ from openevolve.utils.logging_utils import LoggerPrefixFilter
 logger = logging.getLogger(__name__)
 
 
+class EvolutionFailedError(RuntimeError):
+    """Raised when every iteration of a run failed without producing a candidate
+    program, e.g. because the LLM endpoint is unreachable (issue #288)"""
+
+
 class OpenEvolve:
     """
     Main controller for OpenEvolve
@@ -261,6 +266,9 @@ class OpenEvolve:
 
         Returns:
             Best program found
+
+        Raises:
+            EvolutionFailedError: If iterations ran but none produced a candidate program
         """
         max_iterations = self.config.max_iterations if iterations is None else iterations
         # Determine starting iteration
@@ -374,6 +382,15 @@ class OpenEvolve:
             await self._run_evolution_with_checkpoints(
                 evolution_start, evolution_iterations, target_score
             )
+
+            # A run where nothing was generated must not end looking like a run that
+            # simply found nothing better than the seed (issue #288)
+            if self.parallel_controller.produced_no_candidates:
+                raise EvolutionFailedError(
+                    f"Evolution failed: 0/{self.parallel_controller.completed_iterations} "
+                    f"iterations produced a candidate program. "
+                    f"Last error: {self.parallel_controller.last_iteration_error}"
+                )
 
         finally:
             # Clean up parallel processing resources

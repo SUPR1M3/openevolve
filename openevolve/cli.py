@@ -10,7 +10,7 @@ import os
 import sys
 from typing import Any, Dict, List, Optional
 
-from openevolve import OpenEvolve
+from openevolve import EvolutionFailedError, OpenEvolve
 from openevolve.config import Config, load_config
 
 logger = logging.getLogger(__name__)
@@ -223,6 +223,11 @@ async def main_async() -> int:
             print(f"To resume, use: --checkpoint {latest_checkpoint}")
 
         return 0
+
+    except EvolutionFailedError as e:
+        # Expected failure mode with an actionable message, no traceback needed
+        print(f"\n{e}")
+        return 1
 
     except Exception as e:
         print(f"Error: {str(e)}")

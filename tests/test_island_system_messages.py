@@ -136,6 +136,7 @@ class TestIslandSystemMessages(unittest.TestCase):
                 )
                 with patch("openevolve.controller.ProcessParallelController") as parallel:
                     parallel.return_value.run_evolution = AsyncMock(return_value=None)
+                    parallel.return_value.produced_no_candidates = False
                     asyncio.run(resumed.run(iterations=1, checkpoint_path=str(checkpoint)))
 
             self.assertEqual(resumed.database.last_iteration, 3)

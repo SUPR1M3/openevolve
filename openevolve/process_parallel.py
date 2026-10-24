@@ -487,6 +487,14 @@ class ProcessParallelController:
         self.shutdown_event = mp.Event()
         self.early_stopping_triggered = False
 
+        # Per-run outcome counters, reset by run_evolution (issue #288)
+        self.completed_iterations = 0
+        self.successful_iterations = 0
+        self.last_iteration_error: Optional[str] = None
+        # True when the last run completed iterations but every one of them failed
+        # before producing a candidate program
+        self.produced_no_candidates = False
+
         # Number of worker processes
         self.num_workers = config.evaluator.parallel_evaluations
         self.num_islands = config.database.num_islands
@@ -691,6 +699,10 @@ class ProcessParallelController:
 
         next_iteration = current_iteration
         completed_iterations = 0
+        # Iterations whose worker produced a candidate program. A run where this
+        # stays at zero (e.g. the LLM endpoint is down) made no progress at all.
+        successful_iterations = 0
+        self.last_iteration_error = None
         total_prompt_tokens = 0
         total_completion_tokens = 0
         total_tokens = 0
@@ -752,10 +764,13 @@ class ProcessParallelController:
                     token_str = f" | tokens: {tt} (prompt: {pt}, completion: {ct})"
 
                 if result.error:
+                    self.last_iteration_error = result.error
                     logger.warning(
                         f"Iteration {completed_iteration} error: {result.error}{token_str}"
                     )
                 elif result.child_program_dict:
+                    successful_iterations += 1
+
                     # Reconstruct program from dict
                     child_program = Program(**result.child_program_dict)
 
@@ -971,6 +986,7 @@ class ProcessParallelController:
             except FutureTimeoutError as e:
                 if getattr(e, "_openevolve_strategy_error", False):
                     raise
+                self.last_iteration_error = f"Iteration timed out after {timeout_seconds}s"
                 logger.error(
                     f"⏰ Iteration {completed_iteration} timed out after {timeout_seconds}s "
                     f"(evaluator timeout: {self.config.evaluator.timeout}s + 30s buffer). "
@@ -981,6 +997,7 @@ class ProcessParallelController:
             except Exception as e:
                 if getattr(e, "_openevolve_strategy_error", False):
                     raise
+                self.last_iteration_error = str(e)
                 logger.error(f"Error processing result from iteration {completed_iteration}: {e}")
 
             completed_iterations += 1
@@ -1028,6 +1045,21 @@ class ProcessParallelController:
             logger.info("✅ Evolution completed - Shutdown requested")
         else:
             logger.info("✅ Evolution completed - Maximum iterations reached")
+
+        self.completed_iterations = completed_iterations
+        self.successful_iterations = successful_iterations
+        # An interrupted run is not a failed one. Evaluated here, before stop()
+        # sets the shutdown event as part of normal cleanup.
+        self.produced_no_candidates = (
+            completed_iterations > 0
+            and successful_iterations == 0
+            and not self.shutdown_event.is_set()
+        )
+        if self.produced_no_candidates:
+            logger.error(
+                f"❌ None of the {completed_iterations} iterations produced a candidate program. "
+                f"Last error: {self.last_iteration_error}"
+            )
 
         if total_llm_calls > 0:
             logger.info(

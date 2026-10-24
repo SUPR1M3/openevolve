@@ -12,10 +12,11 @@ from openevolve.api import (
 )
 from openevolve.coevolution import CoevolutionResult, Opponent, Population, run_coevolution
 from openevolve.config import Config
-from openevolve.controller import OpenEvolve
+from openevolve.controller import EvolutionFailedError, OpenEvolve
 
 __all__ = [
     "Config",
+    "EvolutionFailedError",
     "OpenEvolve",
     "__version__",
     "run_evolution",
