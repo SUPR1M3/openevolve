@@ -47,11 +47,12 @@ database:
 - **migration_rate**: 0.05-0.2 (5%-20%, higher = faster knowledge sharing)
 - **island_initial_programs**: Start islands from different programs, e.g. distinct
   algorithmic approaches. Entry *i* is the program island *i* starts from; `null` or a
-  missing entry keeps the default (the island is filled from the best program when first
-  sampled). Entry 0 must be `null`, because island 0 always starts from the initial
-  program given on the command line, and the list may not be longer than `num_islands`.
-  Relative paths resolve against the config file's directory. Each seed is evaluated once
-  at the start of a fresh run; resuming from a checkpoint does not add them again.
+  missing entry keeps the default (the island starts empty and takes its first parent
+  from the other islands). Entry 0 must be `null`, because island 0 always starts from
+  the initial program given on the command line, and the list may not be longer than
+  `num_islands`. Relative paths resolve against the config file's directory. Each seed is
+  evaluated once at the start of a fresh run; resuming from a checkpoint does not add
+  them again.
 
 ### When to Use What
 
