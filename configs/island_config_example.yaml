@@ -23,6 +23,10 @@ database:
   
   # Island-based evolution settings
   num_islands: 5                    # Number of separate populations
+  # Optional starting program per island; null/missing starts the island as usual.
+  # Entry 0 must be null (island 0 starts from the command-line initial program).
+  # Relative paths resolve against this config file's directory.
+  # island_initial_programs: [null, "seeds/greedy.py", null, "seeds/random_search.py"]
   migration_interval: 50            # Migrate every 50 generations
   migration_rate: 0.1               # Migrate 10% of top programs
   

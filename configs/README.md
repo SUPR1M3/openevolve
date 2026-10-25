@@ -37,7 +37,7 @@ database:
   num_islands: 5                      # Number of separate populations
   migration_interval: 50              # Migrate every N generations  
   migration_rate: 0.1                 # Fraction of top programs to migrate
-  island_initial_programs: [null, "seeds/greedy.py"]  # Optional per-island starting programs
+  # island_initial_programs: [null, "seeds/greedy.py"]  # Optional per-island starting programs
 ```
 
 ### Parameter Guidelines
