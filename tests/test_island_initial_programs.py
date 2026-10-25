@@ -188,6 +188,18 @@ class TestIslandInitialProgramsController(unittest.TestCase):
         with self.assertRaisesRegex(FileNotFoundError, r"island_initial_programs\[1\].*missing"):
             self._make_controller(config)
 
+    def test_config_built_in_code_is_validated_at_construction(self):
+        # Config objects built in code (e.g. for run_evolution) skip Config.from_dict
+        cases = {
+            "more entries": ([None, self.seed_one_path, self.seed_three_path], "num_islands"),
+            "entry zero": ([self.seed_one_path], r"island_initial_programs\[0\]"),
+        }
+        for name, (seeds, message) in cases.items():
+            with self.subTest(name):
+                config = self._make_config(seeds, num_islands=2)
+                with self.assertRaisesRegex(ValueError, message):
+                    self._make_controller(config)
+
     def test_different_extension_warns(self):
         seed_path = self._write("seed.rs", "fn solve() {}\n")
         config = self._make_config([None, seed_path])

@@ -387,6 +387,19 @@ class DatabaseConfig:
     embedding_api_base: Optional[str] = None
     similarity_threshold: float = 0.99
 
+    def validate_island_initial_programs(self) -> None:
+        """Check island_initial_programs against num_islands and the island 0 rule"""
+        if len(self.island_initial_programs) > self.num_islands:
+            raise ValueError(
+                "database.island_initial_programs has more entries than database.num_islands"
+            )
+
+        if self.island_initial_programs and self.island_initial_programs[0] is not None:
+            raise ValueError(
+                "database.island_initial_programs[0] must be null; island 0 starts from the "
+                "initial program passed on the command line"
+            )
+
 
 @dataclass
 class EvaluatorConfig:
@@ -544,19 +557,7 @@ class Config:
                 "prompt.island_system_messages has more entries than database.num_islands"
             )
 
-        if len(config.database.island_initial_programs) > config.database.num_islands:
-            raise ValueError(
-                "database.island_initial_programs has more entries than database.num_islands"
-            )
-
-        if (
-            config.database.island_initial_programs
-            and config.database.island_initial_programs[0] is not None
-        ):
-            raise ValueError(
-                "database.island_initial_programs[0] must be null; island 0 starts from the "
-                "initial program passed on the command line"
-            )
+        config.database.validate_island_initial_programs()
 
         if config.prompt.programs_as_changes_description and not config.diff_based_evolution:
             raise ValueError(

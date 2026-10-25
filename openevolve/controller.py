@@ -119,7 +119,9 @@ class OpenEvolve:
             if not self.file_extension.startswith("."):
                 self.file_extension = f".{self.file_extension}"
 
-        # Load per-island initial programs (island 0 always starts from the initial program)
+        # Load per-island initial programs (island 0 always starts from the initial program).
+        # Validate again: a Config built in code never passes through Config.from_dict
+        self.config.database.validate_island_initial_programs()
         self.island_initial_program_codes: Dict[int, str] = {}
         for island_idx, seed_path in enumerate(self.config.database.island_initial_programs):
             if seed_path is None:
