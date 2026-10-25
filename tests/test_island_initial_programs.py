@@ -204,8 +204,9 @@ class TestIslandInitialProgramsController(unittest.TestCase):
         seed_path = self._write("seed.rs", "fn solve() {}\n")
         config = self._make_config([None, seed_path])
         with self.assertLogs("openevolve.controller", level="WARNING") as logs:
-            self._make_controller(config)
+            controller = self._make_controller(config)
         self.assertTrue(any("different extension" in line for line in logs.output))
+        self.assertEqual(controller.island_initial_program_codes, {1: "fn solve() {}\n"})
 
     def test_rejected_seed_warns_and_leaves_island_empty(self):
         strategy = PopulationStrategy(admit=lambda snapshot, candidate, island: island == 0)
