@@ -36,6 +36,9 @@ def _get_library_test_config(port: int = 8000) -> Config:
     # Bound generation length so the (non-stopping) dhara model does not ramble to
     # the 4096-token default on every call (see tests/test_utils.py for details).
     config.llm.max_tokens = 256
+    # Full rewrites so the small model always yields a candidate (see
+    # get_integration_config in tests/test_utils.py); runs with no candidates fail.
+    config.diff_based_evolution = False
     config.llm.models = [
         LLMModelConfig(
             name=TEST_MODEL,
