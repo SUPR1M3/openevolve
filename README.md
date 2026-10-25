@@ -602,6 +602,7 @@ database:
   # MAP-Elites quality-diversity
   population_size: 500
   num_islands: 5  # Parallel evolution
+  # island_initial_programs: [null, "seeds/alt.py"]  # Optional per-island starting programs
   migration_interval: 20
   feature_dimensions: ["complexity", "diversity", "performance"]
 

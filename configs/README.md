@@ -37,6 +37,7 @@ database:
   num_islands: 5                      # Number of separate populations
   migration_interval: 50              # Migrate every N generations  
   migration_rate: 0.1                 # Fraction of top programs to migrate
+  island_initial_programs: [null, "seeds/greedy.py"]  # Optional per-island starting programs
 ```
 
 ### Parameter Guidelines
@@ -44,6 +45,13 @@ database:
 - **num_islands**: 3-10 for most problems (more = more diversity)
 - **migration_interval**: 25-100 generations (higher = more independence)
 - **migration_rate**: 0.05-0.2 (5%-20%, higher = faster knowledge sharing)
+- **island_initial_programs**: Start islands from different programs, e.g. distinct
+  algorithmic approaches. Entry *i* is the program island *i* starts from; `null` or a
+  missing entry keeps the default (the island is filled from the best program when first
+  sampled). Entry 0 must be `null`, because island 0 always starts from the initial
+  program given on the command line, and the list may not be longer than `num_islands`.
+  Relative paths resolve against the config file's directory. Each seed is evaluated once
+  at the start of a fresh run; resuming from a checkpoint does not add them again.
 
 ### When to Use What
 
