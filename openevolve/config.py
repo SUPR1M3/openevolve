@@ -335,6 +335,9 @@ class DatabaseConfig:
     population_size: int = 1000
     archive_size: int = 100
     num_islands: int = 5
+    # Entry i is the program island i starts from; null or missing keeps the default.
+    # Island 0 always starts from the initial program passed on the command line.
+    island_initial_programs: List[Optional[str]] = field(default_factory=list)
 
     # Selection parameters
     elite_selection_ratio: float = 0.1
@@ -486,6 +489,16 @@ class Config:
             if not template_path.is_absolute():
                 config.prompt.template_dir = str((config_path.parent / template_path).resolve())
 
+        # Resolve island_initial_programs relative to config file location
+        config.database.island_initial_programs = [
+            (
+                str((config_path.parent / seed_path).resolve())
+                if seed_path is not None and not Path(seed_path).is_absolute()
+                else seed_path
+            )
+            for seed_path in config.database.island_initial_programs
+        ]
+
         return config
 
     @classmethod
@@ -529,6 +542,20 @@ class Config:
         if len(config.prompt.island_system_messages) > config.database.num_islands:
             raise ValueError(
                 "prompt.island_system_messages has more entries than database.num_islands"
+            )
+
+        if len(config.database.island_initial_programs) > config.database.num_islands:
+            raise ValueError(
+                "database.island_initial_programs has more entries than database.num_islands"
+            )
+
+        if (
+            config.database.island_initial_programs
+            and config.database.island_initial_programs[0] is not None
+        ):
+            raise ValueError(
+                "database.island_initial_programs[0] must be null; island 0 starts from the "
+                "initial program passed on the command line"
             )
 
         if config.prompt.programs_as_changes_description and not config.diff_based_evolution:
