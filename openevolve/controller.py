@@ -119,6 +119,23 @@ class OpenEvolve:
             if not self.file_extension.startswith("."):
                 self.file_extension = f".{self.file_extension}"
 
+        # Load per-island initial programs (island 0 always starts from the initial program)
+        self.island_initial_program_codes: Dict[int, str] = {}
+        for island_idx, seed_path in enumerate(self.config.database.island_initial_programs):
+            if seed_path is None:
+                continue
+            if not os.path.isfile(seed_path):
+                raise FileNotFoundError(
+                    f"database.island_initial_programs[{island_idx}] '{seed_path}' does not exist"
+                )
+            if Path(seed_path).suffix != Path(initial_program_path).suffix:
+                logger.warning(
+                    f"Initial program for island {island_idx} '{seed_path}' has a different "
+                    f"extension than '{initial_program_path}'"
+                )
+            with open(seed_path, "r") as f:
+                self.island_initial_program_codes[island_idx] = f.read()
+
         # Set the file_suffix in config (can be overridden in YAML)
         if not hasattr(self.config, "file_suffix") or self.config.file_suffix == ".py":
             self.config.file_suffix = self.file_extension
@@ -250,6 +267,38 @@ class OpenEvolve:
         with open(self.initial_program_path, "r") as f:
             return f.read()
 
+    async def _add_initial_program(
+        self, code: str, iteration: int, target_island: Optional[int] = None
+    ) -> Program:
+        """Evaluate a starting program, add it to the database, and store its artifacts"""
+        program_id = str(uuid.uuid4())
+
+        # Evaluate the initial program
+        metrics = await self.evaluator.evaluate_program(code, program_id)
+
+        program = Program(
+            id=program_id,
+            code=code,
+            changes_description=self.config.prompt.initial_changes_description,
+            language=self.config.language,
+            metrics=metrics,
+            iteration_found=iteration,
+        )
+
+        if self.database.add(program, target_island=target_island) is None:
+            logger.warning(
+                f"Population strategy rejected the initial program for island {target_island}"
+            )
+            return program
+
+        # Check for and store artifacts from initial program
+        artifacts = self.evaluator.get_pending_artifacts(program_id)
+        if artifacts:
+            self.database.store_artifacts(program_id, artifacts)
+            logger.info(f"Stored artifacts for initial program")
+
+        return program
+
     async def run(
         self,
         iterations: Optional[int] = None,
@@ -291,29 +340,14 @@ class OpenEvolve:
 
         if should_add_initial:
             logger.info("Adding initial program to database")
-            initial_program_id = str(uuid.uuid4())
-
-            # Evaluate the initial program
-            initial_metrics = await self.evaluator.evaluate_program(
-                self.initial_program_code, initial_program_id
+            initial_program = await self._add_initial_program(
+                self.initial_program_code, start_iteration
             )
+            initial_metrics = initial_program.metrics
 
-            initial_program = Program(
-                id=initial_program_id,
-                code=self.initial_program_code,
-                changes_description=self.config.prompt.initial_changes_description,
-                language=self.config.language,
-                metrics=initial_metrics,
-                iteration_found=start_iteration,
-            )
-
-            self.database.add(initial_program)
-
-            # Check for and store artifacts from initial program
-            initial_artifacts = self.evaluator.get_pending_artifacts(initial_program_id)
-            if initial_artifacts:
-                self.database.store_artifacts(initial_program_id, initial_artifacts)
-                logger.info(f"Stored artifacts for initial program")
+            for island_idx, seed_code in self.island_initial_program_codes.items():
+                logger.info(f"Adding initial program for island {island_idx} to database")
+                await self._add_initial_program(seed_code, start_iteration, island_idx)
 
             # Check if combined_score is present in the metrics
             if "combined_score" not in initial_metrics:
