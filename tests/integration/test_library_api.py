@@ -77,7 +77,7 @@ class TestLibraryAPIIntegration:
         result = evolve_function(
             simple_multiply,
             test_cases,
-            iterations=2,  # Very small number for CI speed
+            iterations=3,  # A few iterations: one empty reply from the small model would leave no candidate
             output_dir=str(temp_workspace / "evolve_function_output"),
             cleanup=False,  # Keep files for inspection
             config=_get_library_test_config(optillm_server["port"]),
@@ -165,7 +165,7 @@ def fibonacci(n):
         result = evolve_code(
             initial_code,
             fibonacci_evaluator,
-            iterations=1,  # Minimal for CI speed
+            iterations=3,  # A few iterations: one empty reply from the small model would leave no candidate
             output_dir=str(temp_workspace / "evolve_code_output"),
             cleanup=False,  # Keep output directory
             config=_get_library_test_config(optillm_server["port"]),
@@ -260,7 +260,7 @@ def evaluate(program_path):
         result = run_evolution(
             initial_program=str(initial_program),
             evaluator=str(evaluator_file),
-            iterations=1,  # Minimal for CI speed
+            iterations=3,  # A few iterations: one empty reply from the small model would leave no candidate
             output_dir=str(temp_workspace / "run_evolution_output"),
             cleanup=False,  # Keep output directory
             config=_get_library_test_config(optillm_server["port"]),
@@ -287,7 +287,7 @@ def evaluate(program_path):
         result2 = run_evolution(
             initial_program=initial_program.read_text(),
             evaluator=lambda path: {"score": 0.8, "test": "passed"},  # Simple callable evaluator
-            iterations=1,
+            iterations=3,  # A few iterations: one empty reply from the small model would leave no candidate
             output_dir=str(temp_workspace / "run_evolution_string_output"),
             cleanup=False,  # Keep output directory
             config=_get_library_test_config(optillm_server["port"]),
