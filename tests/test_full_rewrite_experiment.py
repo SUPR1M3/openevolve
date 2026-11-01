@@ -111,13 +111,25 @@ class TestAnalysis(unittest.TestCase):
 
 
 class TestFailureCapture(unittest.TestCase):
-    def test_rejection_line(self):
+    def _collect(self, *messages):
         import logging
 
-        collector = exp._RejectionCollector()
-        record = logging.makeLogRecord({"msg": "Database rejected program %s", "args": ("abc-1",)})
-        collector.emit(record)
+        collector = exp._ControllerLogCollector()
+        for msg, args in messages:
+            collector.emit(logging.makeLogRecord({"msg": msg, "args": args}))
+        return collector
+
+    def test_rejection_line(self):
+        collector = self._collect(("Database rejected program %s", ("abc-1",)))
         self.assertEqual(collector.rejected_ids, ["abc-1"])
+
+    def test_completion_line(self):
+        # The controller's success line, as ProcessParallelController formats it
+        collector = self._collect(
+            ("Iteration 8: Program b71b (parent: 2316) completed in 401.26s", None),
+            ("Iteration 7 error [diff]: No valid diffs found in response", None),
+        )
+        self.assertEqual(collector.completed, {8})
 
     def test_failure_reasons_group_numbers(self):
         run = _run(
@@ -137,6 +149,40 @@ class TestFailureCapture(unittest.TestCase):
                 ("full_rewrite", "Program execution failed"): 1,
             },
         )
+
+
+class TestGrid(unittest.TestCase):
+    EXAMPLES = [("fast", Path("f.yaml")), ("slow", Path("s.yaml"))]
+
+    def _grid(self, shard=None):
+        return [
+            (name, p, seed)
+            for name, _, p, seed in exp.build_grid(self.EXAMPLES, [0.0, 0.2, 0.5], [1, 2, 3], shard)
+        ]
+
+    def test_full_grid_seed_outermost(self):
+        grid = self._grid()
+        self.assertEqual(len(set(grid)), 18)
+        self.assertEqual([seed for _, _, seed in grid], [1] * 6 + [2] * 6 + [3] * 6)
+
+    def test_shards_partition_the_grid(self):
+        shards = [self._grid((k, 2)) for k in range(2)]
+        self.assertEqual(sorted(shards[0] + shards[1]), sorted(self._grid()))
+        self.assertFalse(set(shards[0]) & set(shards[1]))
+
+    def test_each_probability_runs_on_both_shards(self):
+        for k in range(2):
+            for name in ("fast", "slow"):
+                probs = {p for n, p, _ in self._grid((k, 2)) if n == name}
+                self.assertEqual(probs, {0.0, 0.2, 0.5}, (k, name))
+
+    def test_parse_shard(self):
+        import argparse
+
+        self.assertEqual(exp._parse_shard("1/2"), (1, 2))
+        for bad in ("2/2", "-1/2", "0/0", "a/b", "1"):
+            with self.assertRaises(argparse.ArgumentTypeError):
+                exp._parse_shard(bad)
 
 
 class TestRunConfig(unittest.TestCase):

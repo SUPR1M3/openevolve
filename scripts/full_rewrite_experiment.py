@@ -33,6 +33,7 @@ import logging
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -58,8 +59,10 @@ PARSE_FAILURE = "parse_failure"  # rejected by the worker before evaluation
 REJECTED = "rejected"  # evaluated, then rejected by the database (e.g. novelty)
 MISSING = "missing"  # no record (timeout, worker crash, shutdown)
 
-# Logged by ProcessParallelController; rejections are not in the trace or the failures file
+# Logged by ProcessParallelController. Rejections are in neither the trace nor the failures
+# file; completions are used to check that every finished iteration reached the trace
 _REJECTED_RE = re.compile(r"^Database rejected program (\S+)")
+_COMPLETED_RE = re.compile(r"^Iteration (\d+): Program \S+ \(parent: ")
 
 
 # ---------------------------------------------------------------------------
@@ -141,17 +144,23 @@ def redact(obj: Any) -> Any:
     return obj
 
 
-class _RejectionCollector(logging.Handler):
-    """Collects children the database rejected, from the controller's log lines"""
+class _ControllerLogCollector(logging.Handler):
+    """Collects rejected children and completed iterations from the controller's log lines"""
 
     def __init__(self):
         super().__init__(level=logging.INFO)
         self.rejected_ids: List[str] = []
+        self.completed: set = set()
 
     def emit(self, record):
-        match = _REJECTED_RE.match(record.getMessage())
+        message = record.getMessage()
+        match = _REJECTED_RE.match(message)
         if match:
             self.rejected_ids.append(match.group(1))
+            return
+        match = _COMPLETED_RE.match(message)
+        if match:
+            self.completed.add(int(match.group(1)))
 
 
 def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
@@ -203,9 +212,11 @@ def run_one(
     for path in (trace_path, failures_path):
         if path.exists():
             path.unlink()  # a rerun must not append to an old trace
+    # Nor reuse checkpoints or logs from a run that was cut off
+    shutil.rmtree(run_dir / "openevolve_output", ignore_errors=True)
 
     config = Config.from_dict(raw)
-    collector = _RejectionCollector()
+    collector = _ControllerLogCollector()
     logging.getLogger("openevolve.process_parallel").addHandler(collector)
 
     controller = OpenEvolve(
@@ -231,6 +242,7 @@ def run_one(
 
     records = []
     mode_mismatches = 0
+    untraced = 0
     for iteration in range(1, iterations + 1):
         # Seeded runs pick the mode from (seed, iteration), so it is known even without a record
         expected_mode = _choose_evolution_mode(config, iteration)
@@ -260,6 +272,9 @@ def run_one(
             )
         else:
             record["outcome"] = MISSING
+            if iteration in collector.completed:
+                record["error"] = "completed, but not in the evolution trace"
+                untraced += 1
         if record["mode"] != expected_mode:
             mode_mismatches += 1
         records.append(record)
@@ -275,10 +290,16 @@ def run_one(
         "wall_time_s": wall_time,
         "database_rejections": len(rejected),
         "mode_mismatches": mode_mismatches,
+        "untraced_completions": untraced,
         "records": records,
     }
     with open(run_dir / "run.json", "w") as f:
         json.dump(summary, f, indent=2)
+    if untraced:
+        print(
+            f"WARNING: {untraced} completed iteration(s) are missing from the evolution trace",
+            file=sys.stderr,
+        )
     if mode_mismatches:
         print(
             f"WARNING: {mode_mismatches} iteration(s) ran in a different mode than the seed "
@@ -288,14 +309,32 @@ def run_one(
     return summary
 
 
-def cmd_run(args) -> int:
-    output_dir = Path(args.output_dir).resolve()
+def build_grid(
+    examples: List[Tuple[str, Path]],
+    probabilities: List[float],
+    seeds: List[int],
+    shard: Optional[Tuple[int, int]] = None,
+) -> List[Tuple[str, Path, float, int]]:
+    """Runs in order: seed outermost, so a grid cut short (--max-hours) leaves whole seeds,
+    every probability with the same number of runs. The probability order rotates with each
+    seed so that a shard (one GPU) is not tied to one probability for every seed. A shard is
+    taken over the full grid, not just unfinished runs, so it is the same in every session"""
     grid = [
         (name, path, p, seed)
-        for name, path in (resolve_example(e) for e in args.examples)
-        for p in args.probabilities
-        for seed in args.seeds
+        for j, seed in enumerate(seeds)
+        for name, path in examples
+        for p in probabilities[j % len(probabilities) :] + probabilities[: j % len(probabilities)]
     ]
+    if shard:
+        index, count = shard
+        grid = grid[index::count]
+    return grid
+
+
+def cmd_run(args) -> int:
+    output_dir = Path(args.output_dir).resolve()
+    examples = [resolve_example(e) for e in args.examples]
+    grid = build_grid(examples, args.probabilities, args.seeds, args.shard)
     for p in args.probabilities:
         if not 0.0 <= p <= 1.0:
             raise SystemExit(f"probability {p} is not between 0 and 1")
@@ -317,7 +356,17 @@ def cmd_run(args) -> int:
         return 0
 
     failed = []
+    started = time.monotonic()
+    longest_run = 0.0
     for i, (name, path, p, seed) in enumerate(todo, 1):
+        elapsed = time.monotonic() - started
+        if args.max_hours is not None and elapsed + longest_run > args.max_hours * 3600:
+            print(
+                f"\nStopping before run {i}/{len(todo)}: another run would not finish within "
+                f"--max-hours {args.max_hours:g} ({elapsed / 3600:.1f}h used, longest run "
+                f"{longest_run / 3600:.1f}h). Rerun the same command to continue."
+            )
+            break
         run_dir = run_dir_for(output_dir, name, p, seed)
         print(f"\n[{i}/{len(todo)}] {name} p={p:g} seed={seed} -> {run_dir}", flush=True)
         cmd = [
@@ -342,8 +391,10 @@ def cmd_run(args) -> int:
         if args.llm_config:
             cmd += ["--llm-config", str(Path(args.llm_config).resolve())]
         run_dir.mkdir(parents=True, exist_ok=True)
+        run_started = time.monotonic()
         with open(run_dir / "stdout.log", "w") as log:
             proc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=REPO_ROOT)
+        longest_run = max(longest_run, time.monotonic() - run_started)
         if proc.returncode != 0:
             failed.append(run_dir)
             print(f"  FAILED (exit {proc.returncode}), see {run_dir / 'stdout.log'}")
@@ -500,6 +551,13 @@ def build_report(runs: List[Dict[str, Any]]) -> str:
     mismatches = sum(r.get("mode_mismatches", 0) for r in runs)
     if mismatches:
         lines += [f"> **Warning:** {mismatches} iteration(s) ran in an unexpected mode.", ""]
+    untraced = sum(r.get("untraced_completions", 0) for r in runs)
+    if untraced:
+        lines += [
+            f"> **Warning:** {untraced} completed iteration(s) are missing from the evolution "
+            "trace, so their scores are not in these results.",
+            "",
+        ]
 
     for example in sorted(by_example):
         cells = by_example[example]
@@ -684,6 +742,16 @@ def cmd_analyze(args) -> int:
     return 0
 
 
+def _parse_shard(value: str) -> Tuple[int, int]:
+    try:
+        index, count = (int(part) for part in value.split("/"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected K/N, e.g. 0/2, got {value!r}")
+    if count < 1 or not 0 <= index < count:
+        raise argparse.ArgumentTypeError(f"need 0 <= K < N, got {value!r}")
+    return index, count
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -705,6 +773,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     run.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     run.add_argument("--dry-run", action="store_true", help="print the grid without running")
     run.add_argument("--force", action="store_true", help="rerun runs that already finished")
+    run.add_argument(
+        "--shard",
+        type=_parse_shard,
+        metavar="K/N",
+        help="run only every Nth run of the grid, starting at the Kth (0-based), e.g. one per GPU",
+    )
+    run.add_argument(
+        "--max-hours",
+        type=float,
+        help="do not start a run that, judged by the longest run so far, would end after this",
+    )
     run.set_defaults(func=cmd_run)
 
     one = sub.add_parser("_run-one", help=argparse.SUPPRESS)
