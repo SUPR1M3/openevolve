@@ -1,0 +1,22 @@
+# LLM settings for scripts/full_rewrite_experiment.py on a local Ollama server.
+#   python scripts/full_rewrite_experiment.py run --llm-config scripts/full_rewrite_experiment_ollama.yaml
+#
+# qwen3-16k is qwen3:8b with num_ctx 16384 (create it with a Modelfile containing
+# `FROM qwen3:8b` and `PARAMETER num_ctx 16384`); Ollama's default context is too small
+# for OpenEvolve prompts. reasoning_effort "none" turns off Qwen3's thinking, which
+# otherwise uses the whole token budget before writing any code.
+llm:
+  api_base: "http://localhost:11434/v1"
+  api_key: "ollama"  # ignored by Ollama, but the OpenAI client needs one
+  models:
+    - name: "qwen3-16k"
+      weight: 1.0
+  temperature: 0.7
+  top_p: 0.95
+  max_tokens: 4096
+  reasoning_effort: "none"
+  # Ollama serves requests one at a time (or slices throughput between them), so a request
+  # can wait behind other workers' requests: allow for the queue
+  timeout: 1200
+  retries: 1
+  retry_delay: 10
